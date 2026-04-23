@@ -1,0 +1,43 @@
+name: Test Runner Connection
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  test-job:
+    if: github.event.label.name == 'test-runner'
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Show environment info
+        run: |
+          echo "=== Runner Environment ==="
+          whoami
+          hostname
+          echo "PWD: ${PWD}"
+          echo "=== GitHub Event Info ==="
+          echo "Issue #: ${{ github.event.issue.number }}"
+          echo "Issue Title: ${{ github.event.issue.title }}"
+          echo "Label: ${{ github.event.label.name }}"
+      
+      - name: List files in workspace
+        run: |
+          echo "=== Repository Files ==="
+          ls -la
+          echo "=== README Content ==="
+          cat README.md
+      
+      - name: Report success back to Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ **Runner動作確認成功！**\n\n- Runner名: \`${{ runner.name }}\`\n- OS: \`${{ runner.os }}\`\n- 実行時刻: \${new Date().toISOString()}\`\n\n環境情報の出力を確認してください。`
+            });
