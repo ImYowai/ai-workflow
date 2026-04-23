@@ -1,4 +1,4 @@
-name: Kimi Task Executor (Debug)
+name: Kimi Task Executor
 
 on:
   issues:
@@ -18,9 +18,7 @@ jobs:
         run: |
           Write-Host "=== Environment Debug ==="
           Write-Host "Current directory: $(Get-Location)"
-          Write-Host "PATH: $env:PATH"
           Write-Host "Whoami: $env:USERNAME"
-          Write-Host "---"
           $kimiPath = Get-Command kimi -ErrorAction SilentlyContinue
           if ($kimiPath) {
             Write-Host "kimi found at: $($kimiPath.Source)"
@@ -40,45 +38,24 @@ jobs:
             }
           }
       
-      - name: Test GITHUB_TOKEN permissions
-        shell: powershell
-        run: |
-          Write-Host "=== GITHUB_TOKEN Test ==="
-          Write-Host "Token exists: $(if ($env:GITHUB_TOKEN) { 'YES' } else { 'NO' })"
-          try {
-            $headers = @{
-              "Authorization" = "Bearer $env:GITHUB_TOKEN"
-              "Accept" = "application/vnd.github.v3+json"
-            }
-            $uri = "https://api.github.com/repos/${{ github.repository }}"
-            $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
-            Write-Host "READ test: SUCCESS"
-          } catch {
-            Write-Host "READ test: FAILED - $($_.Exception.Message)"
-          }
-          try {
-            $issueUri = "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments"
-            $body = @{ body = "Token write test" } | ConvertTo-Json
-            $response = Invoke-RestMethod -Uri $issueUri -Headers $headers -Method Post -Body $body -ContentType "application/json"
-            Write-Host "WRITE test: SUCCESS"
-          } catch {
-            Write-Host "WRITE test: FAILED - $($_.Exception.Message)"
-          }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: Save task to file
         shell: powershell
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           Write-Host "=== Save task step started ==="
           try {
-            $issueTitle = "${{ github.event.issue.title }}"
-            $issueBody = "${{ github.event.issue.body }}"
+            $issueTitle = $env:ISSUE_TITLE
+            $issueNumber = $env:ISSUE_NUMBER
+            $issueBody = $env:ISSUE_BODY
             Write-Host "Title: $issueTitle"
+            Write-Host "Number: $issueNumber"
             Write-Host "Body length: $($issueBody.Length)"
-            $content = "# Task: $issueTitle`n`n$issueBody"
+            $content = "# Task #$issueNumber`: $issueTitle`n`n$issueBody"
             $content | Out-File -Encoding UTF8 task.md
-            Write-Host "File written. Contents:"
+            Write-Host "File written successfully."
             Get-Content task.md
             Write-Host "=== Save task: SUCCESS ==="
           } catch {
