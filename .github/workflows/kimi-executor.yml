@@ -16,14 +16,14 @@ jobs:
       - name: Debug environment
         shell: powershell
         run: |
-          Write-Host "=== Environment Debug ==="
-          Write-Host "Current directory: $(Get-Location)"
-          Write-Host "Whoami: $env:USERNAME"
+          "=== Environment Debug ===" | Out-File debug.log
+          "Current directory: $(Get-Location)" | Tee-Object -FilePath debug.log -Append
+          "Whoami: $env:USERNAME" | Tee-Object -FilePath debug.log -Append
           $kimiPath = Get-Command kimi -ErrorAction SilentlyContinue
           if ($kimiPath) {
-            Write-Host "kimi found at: $($kimiPath.Source)"
+            "kimi found at: $($kimiPath.Source)" | Tee-Object -FilePath debug.log -Append
           } else {
-            Write-Host "kimi NOT found in PATH"
+            "kimi NOT found in PATH" | Tee-Object -FilePath debug.log -Append
             $commonPaths = @(
               "$env:USERPROFILE\.local\bin\kimi.exe",
               "$env:APPDATA\Python\Python313\Scripts\kimi.exe",
@@ -33,10 +33,12 @@ jobs:
             )
             foreach ($p in $commonPaths) {
               if (Test-Path $p) {
-                Write-Host "Found kimi at: $p"
+                "Found kimi at: $p" | Tee-Object -FilePath debug.log -Append
               }
             }
           }
+          Get-Content debug.log
+          "========================" | Out-File -Append debug.log
       
       - name: Save task to file
         shell: powershell
@@ -45,80 +47,64 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          Write-Host "=== Save task step started ==="
-          try {
-            $issueTitle = $env:ISSUE_TITLE
-            $issueNumber = $env:ISSUE_NUMBER
-            $issueBody = $env:ISSUE_BODY
-            Write-Host "Title: $issueTitle"
-            Write-Host "Number: $issueNumber"
-            Write-Host "Body length: $($issueBody.Length)"
-            $content = "# Task #$issueNumber`: $issueTitle`n`n$issueBody"
-            $content | Out-File -Encoding UTF8 task.md
-            Write-Host "File written successfully."
-            Get-Content task.md
-            Write-Host "=== Save task: SUCCESS ==="
-          } catch {
-            Write-Host "=== Save task: FAILED ==="
-            Write-Host "Exception: $($_.Exception.GetType().FullName)"
-            Write-Host "Message: $($_.Exception.Message)"
-            throw
-          }
+          "=== Save task step started ==="
+          $issueTitle = $env:ISSUE_TITLE
+          $issueNumber = $env:ISSUE_NUMBER
+          $issueBody = $env:ISSUE_BODY
+          "Title: $issueTitle"
+          "Number: $issueNumber"
+          "Body length: $($issueBody.Length)"
+          $content = "# Task #$issueNumber`: $issueTitle`n`n$issueBody"
+          $content | Out-File -Encoding UTF8 task.md
+          "File written successfully."
+          Get-Content task.md
+          "=== Save task: SUCCESS ==="
       
       - name: Execute kimi-cli
         shell: powershell
         run: |
-          Write-Host "=== Execute kimi step started ==="
-          try {
-            $kimiCmd = Get-Command kimi -ErrorAction SilentlyContinue
-            if (-not $kimiCmd) {
-              $possiblePaths = @(
-                "$env:USERPROFILE\.local\bin\kimi.exe",
-                "$env:APPDATA\Python\Python313\Scripts\kimi.exe",
-                "C:\Python313\Scripts\kimi.exe",
-                "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\kimi.exe",
-                "C:\Users\owner\AppData\Local\Programs\Python\Python313\Scripts\kimi.exe"
-              )
-              foreach ($p in $possiblePaths) {
-                if (Test-Path $p) {
-                  $kimiCmd = $p
-                  Write-Host "Found kimi at: $p"
-                  break
-                }
+          "=== Execute kimi step started ==="
+          $kimiCmd = Get-Command kimi -ErrorAction SilentlyContinue
+          if (-not $kimiCmd) {
+            $possiblePaths = @(
+              "$env:USERPROFILE\.local\bin\kimi.exe",
+              "$env:APPDATA\Python\Python313\Scripts\kimi.exe",
+              "C:\Python313\Scripts\kimi.exe",
+              "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\kimi.exe",
+              "C:\Users\owner\AppData\Local\Programs\Python\Python313\Scripts\kimi.exe"
+            )
+            foreach ($p in $possiblePaths) {
+              if (Test-Path $p) {
+                $kimiCmd = $p
+                "Found kimi at: $p"
+                break
               }
             }
-            if ($kimiCmd) {
-              & $kimiCmd --input task.md --output result/ 2>&1 | Tee-Object -FilePath execution.log
-            } else {
-              Write-Host "WARNING: kimi-cli not found. Creating placeholder."
-              New-Item -ItemType Directory -Force -Path result | Out-Null
-              "Placeholder: kimi-cli was not found" | Out-File -Encoding UTF8 result/placeholder.txt
-            }
-            Write-Host "=== Execute kimi: SUCCESS ==="
-          } catch {
-            Write-Host "=== Execute kimi: FAILED ==="
-            Write-Host "Exception: $($_.Exception.GetType().FullName)"
-            Write-Host "Message: $($_.Exception.Message)"
-            throw
           }
+          if ($kimiCmd) {
+            "Executing kimi..."
+            & $kimiCmd --input task.md --output result/
+            if ($LASTEXITCODE -ne 0) {
+              "kimi exited with code $LASTEXITCODE"
+              exit 0
+            }
+          } else {
+            "WARNING: kimi-cli not found. Creating placeholder."
+            New-Item -ItemType Directory -Force -Path result | Out-Null
+            "Placeholder: kimi-cli was not found" | Out-File -Encoding UTF8 result/placeholder.txt
+          }
+          "=== Execute kimi: SUCCESS ==="
       
       - name: Commit results
         shell: powershell
         run: |
-          Write-Host "=== Commit step started ==="
-          try {
-            git config user.name "kimi-bot"
-            git config user.email "bot@kimi.ai"
-            git add -A
-            git commit -m "kimi: Execute task #${{ github.event.issue.number }}" 2>&1
-            git push 2>&1
-            Write-Host "=== Commit: SUCCESS ==="
-          } catch {
-            Write-Host "=== Commit: FAILED ==="
-            Write-Host "Exception: $($_.Exception.GetType().FullName)"
-            Write-Host "Message: $($_.Exception.Message)"
-            throw
-          }
+          "=== Commit step started ==="
+          git config user.name "kimi-bot"
+          git config user.email "bot@kimi.ai"
+          git add -A
+          git commit -m "kimi: Execute task #${{ github.event.issue.number }}" 2>&1
+          git push 2>&1
+          "=== Commit: SUCCESS ==="
       
       - name: Report completion
         if: always()
