@@ -14,21 +14,25 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Show environment info
+        shell: pwsh
         run: |
-          echo "=== Runner Environment ==="
-          echo "Runner name: ${{ runner.name }}"
-          echo "OS: ${{ runner.os }}"
+          Write-Host "=== Runner Environment ==="
+          Write-Host "Runner name: ${{ runner.name }}"
+          Write-Host "OS: ${{ runner.os }}"
           whoami
           hostname
       
       - name: List files
+        shell: pwsh
         run: |
-          echo "=== Repository Files ==="
-          ls -la
-          cat README.md
+          Write-Host "=== Repository Files ==="
+          Get-ChildItem -Force
+          Write-Host "=== README Content ==="
+          Get-Content README.md
       
       - name: Test complete
+        shell: pwsh
         run: |
-          echo "=== TEST PASSED ==="
-          echo "Issue number: ${{ github.event.issue.number }}"
-          echo "Issue title: ${{ github.event.issue.title }}"
+          Write-Host "=== TEST PASSED ==="
+          Write-Host "Issue number: ${{ github.event.issue.number }}"
+          Write-Host "Issue title: ${{ github.event.issue.title }}"
