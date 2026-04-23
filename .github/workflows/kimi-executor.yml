@@ -13,24 +13,67 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      - name: Debug environment
+        shell: powershell
+        run: |
+          Write-Host "=== Environment Debug ==="
+          Write-Host "PATH: $env:PATH"
+          Write-Host "Whoami: $env:USERNAME"
+          $kimiPath = Get-Command kimi -ErrorAction SilentlyContinue
+          if ($kimiPath) {
+            Write-Host "kimi found at: $($kimiPath.Source)"
+          } else {
+            Write-Host "kimi NOT found in PATH"
+            # 一般的なインストール場所を探す
+            $commonPaths = @(
+              "$env:USERPROFILE\.local\bin\kimi.exe",
+              "$env:APPDATA\Python\Python313\Scripts\kimi.exe",
+              "C:\Python313\Scripts\kimi.exe",
+              "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\kimi.exe"
+            )
+            foreach ($p in $commonPaths) {
+              if (Test-Path $p) {
+                Write-Host "Found kimi at: $p"
+              }
+            }
+          }
+      
       - name: Save task to file
         shell: powershell
         run: |
           $issueTitle = "${{ github.event.issue.title }}"
           $issueBody = "${{ github.event.issue.body }}"
-          $taskContent = "# Task: $issueTitle`n`n$issueBody"
-          $taskContent | Out-File -Encoding UTF8 task.md
-          Write-Host "Task saved to task.md"
+          "# Task: $issueTitle`n`n$issueBody" | Out-File -Encoding UTF8 task.md
+          Write-Host "Task saved"
+          Get-Content task.md
       
       - name: Execute kimi-cli
         shell: powershell
         run: |
           Write-Host "=== Starting kimi-cli ==="
-          if (Get-Command kimi -ErrorAction SilentlyContinue) {
-            Write-Host "kimi-cli found, executing..."
-            kimi --input task.md --output result/ 2>&1 | Tee-Object -FilePath execution.log
+          # フルパスで探す
+          $kimiCmd = Get-Command kimi -ErrorAction SilentlyContinue
+          if (-not $kimiCmd) {
+            # pip install された場合の一般的な場所
+            $possiblePaths = @(
+              "$env:USERPROFILE\.local\bin\kimi.exe",
+              "$env:APPDATA\Python\Python313\Scripts\kimi.exe",
+              "C:\Python313\Scripts\kimi.exe",
+              "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\kimi.exe"
+            )
+            foreach ($p in $possiblePaths) {
+              if (Test-Path $p) {
+                $kimiCmd = $p
+                break
+              }
+            }
+          }
+          
+          if ($kimiCmd) {
+            Write-Host "Using kimi: $kimiCmd"
+            & $kimiCmd --input task.md --output result/ 2>&1 | Tee-Object -FilePath execution.log
           } else {
-            Write-Host "kimi-cli not found in PATH"
+            Write-Host "ERROR: kimi-cli not found. Please ensure it's installed and in PATH."
             exit 1
           }
       
@@ -40,26 +83,21 @@ jobs:
           git config user.name "kimi-bot"
           git config user.email "bot@kimi.ai"
           git add -A
-          git commit -m "kimi: Execute task #${{ github.event.issue.number }} - ${{ github.event.issue.title }}"
+          git commit -m "kimi: Execute task #${{ github.event.issue.number }}" || Write-Host "Nothing to commit"
           git push
       
       - name: Report completion
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
+            const result = '${{ job.status }}';
+            const msg = result === 'success' 
+              ? '✅ **作業完了！**' 
+              : '❌ **作業失敗**\\n\\nエラーログを確認してください。';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `✅ **作業完了！**` +
-                `\n\nkimi-cliがタスクを実行しました。` +
-                `\n- Issue: #${context.issue.number}` +
-                `\n- タイトル: ${context.payload.issue.title}` +
-                `\n\n結果はリポジトリにコミットされています。`
-            });
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              labels: ['status:completed']
+              body: msg
             });
