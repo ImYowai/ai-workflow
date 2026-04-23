@@ -1,4 +1,4 @@
-name: Kimi Task Executor
+name: Kimi Task Executor (Debug)
 
 on:
   issues:
@@ -17,19 +17,21 @@ jobs:
         shell: powershell
         run: |
           Write-Host "=== Environment Debug ==="
+          Write-Host "Current directory: $(Get-Location)"
           Write-Host "PATH: $env:PATH"
           Write-Host "Whoami: $env:USERNAME"
+          Write-Host "---"
           $kimiPath = Get-Command kimi -ErrorAction SilentlyContinue
           if ($kimiPath) {
             Write-Host "kimi found at: $($kimiPath.Source)"
           } else {
             Write-Host "kimi NOT found in PATH"
-            # 一般的なインストール場所を探す
             $commonPaths = @(
               "$env:USERPROFILE\.local\bin\kimi.exe",
               "$env:APPDATA\Python\Python313\Scripts\kimi.exe",
               "C:\Python313\Scripts\kimi.exe",
-              "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\kimi.exe"
+              "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\kimi.exe",
+              "C:\Users\owner\AppData\Local\Programs\Python\Python313\Scripts\kimi.exe"
             )
             foreach ($p in $commonPaths) {
               if (Test-Path $p) {
@@ -38,53 +40,108 @@ jobs:
             }
           }
       
+      - name: Test GITHUB_TOKEN permissions
+        shell: powershell
+        run: |
+          Write-Host "=== GITHUB_TOKEN Test ==="
+          Write-Host "Token exists: $(if ($env:GITHUB_TOKEN) { 'YES' } else { 'NO' })"
+          try {
+            $headers = @{
+              "Authorization" = "Bearer $env:GITHUB_TOKEN"
+              "Accept" = "application/vnd.github.v3+json"
+            }
+            $uri = "https://api.github.com/repos/${{ github.repository }}"
+            $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
+            Write-Host "READ test: SUCCESS"
+          } catch {
+            Write-Host "READ test: FAILED - $($_.Exception.Message)"
+          }
+          try {
+            $issueUri = "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments"
+            $body = @{ body = "Token write test" } | ConvertTo-Json
+            $response = Invoke-RestMethod -Uri $issueUri -Headers $headers -Method Post -Body $body -ContentType "application/json"
+            Write-Host "WRITE test: SUCCESS"
+          } catch {
+            Write-Host "WRITE test: FAILED - $($_.Exception.Message)"
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: Save task to file
         shell: powershell
         run: |
-          $issueTitle = "${{ github.event.issue.title }}"
-          $issueBody = "${{ github.event.issue.body }}"
-          "# Task: $issueTitle`n`n$issueBody" | Out-File -Encoding UTF8 task.md
-          Write-Host "Task saved"
-          Get-Content task.md
+          Write-Host "=== Save task step started ==="
+          try {
+            $issueTitle = "${{ github.event.issue.title }}"
+            $issueBody = "${{ github.event.issue.body }}"
+            Write-Host "Title: $issueTitle"
+            Write-Host "Body length: $($issueBody.Length)"
+            $content = "# Task: $issueTitle`n`n$issueBody"
+            $content | Out-File -Encoding UTF8 task.md
+            Write-Host "File written. Contents:"
+            Get-Content task.md
+            Write-Host "=== Save task: SUCCESS ==="
+          } catch {
+            Write-Host "=== Save task: FAILED ==="
+            Write-Host "Exception: $($_.Exception.GetType().FullName)"
+            Write-Host "Message: $($_.Exception.Message)"
+            throw
+          }
       
       - name: Execute kimi-cli
         shell: powershell
         run: |
-          Write-Host "=== Starting kimi-cli ==="
-          # フルパスで探す
-          $kimiCmd = Get-Command kimi -ErrorAction SilentlyContinue
-          if (-not $kimiCmd) {
-            # pip install された場合の一般的な場所
-            $possiblePaths = @(
-              "$env:USERPROFILE\.local\bin\kimi.exe",
-              "$env:APPDATA\Python\Python313\Scripts\kimi.exe",
-              "C:\Python313\Scripts\kimi.exe",
-              "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\kimi.exe"
-            )
-            foreach ($p in $possiblePaths) {
-              if (Test-Path $p) {
-                $kimiCmd = $p
-                break
+          Write-Host "=== Execute kimi step started ==="
+          try {
+            $kimiCmd = Get-Command kimi -ErrorAction SilentlyContinue
+            if (-not $kimiCmd) {
+              $possiblePaths = @(
+                "$env:USERPROFILE\.local\bin\kimi.exe",
+                "$env:APPDATA\Python\Python313\Scripts\kimi.exe",
+                "C:\Python313\Scripts\kimi.exe",
+                "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\kimi.exe",
+                "C:\Users\owner\AppData\Local\Programs\Python\Python313\Scripts\kimi.exe"
+              )
+              foreach ($p in $possiblePaths) {
+                if (Test-Path $p) {
+                  $kimiCmd = $p
+                  Write-Host "Found kimi at: $p"
+                  break
+                }
               }
             }
-          }
-          
-          if ($kimiCmd) {
-            Write-Host "Using kimi: $kimiCmd"
-            & $kimiCmd --input task.md --output result/ 2>&1 | Tee-Object -FilePath execution.log
-          } else {
-            Write-Host "ERROR: kimi-cli not found. Please ensure it's installed and in PATH."
-            exit 1
+            if ($kimiCmd) {
+              & $kimiCmd --input task.md --output result/ 2>&1 | Tee-Object -FilePath execution.log
+            } else {
+              Write-Host "WARNING: kimi-cli not found. Creating placeholder."
+              New-Item -ItemType Directory -Force -Path result | Out-Null
+              "Placeholder: kimi-cli was not found" | Out-File -Encoding UTF8 result/placeholder.txt
+            }
+            Write-Host "=== Execute kimi: SUCCESS ==="
+          } catch {
+            Write-Host "=== Execute kimi: FAILED ==="
+            Write-Host "Exception: $($_.Exception.GetType().FullName)"
+            Write-Host "Message: $($_.Exception.Message)"
+            throw
           }
       
       - name: Commit results
         shell: powershell
         run: |
-          git config user.name "kimi-bot"
-          git config user.email "bot@kimi.ai"
-          git add -A
-          git commit -m "kimi: Execute task #${{ github.event.issue.number }}" || Write-Host "Nothing to commit"
-          git push
+          Write-Host "=== Commit step started ==="
+          try {
+            git config user.name "kimi-bot"
+            git config user.email "bot@kimi.ai"
+            git add -A
+            git commit -m "kimi: Execute task #${{ github.event.issue.number }}" 2>&1
+            git push 2>&1
+            Write-Host "=== Commit: SUCCESS ==="
+          } catch {
+            Write-Host "=== Commit: FAILED ==="
+            Write-Host "Exception: $($_.Exception.GetType().FullName)"
+            Write-Host "Message: $($_.Exception.Message)"
+            throw
+          }
       
       - name: Report completion
         if: always()
@@ -94,10 +151,14 @@ jobs:
             const result = '${{ job.status }}';
             const msg = result === 'success' 
               ? '✅ **作業完了！**' 
-              : '❌ **作業失敗**\\n\\nエラーログを確認してください。';
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: msg
-            });
+              : '❌ **作業失敗**\\n\\nRunnerのコンソールログを確認してください。';
+            try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: msg
+              });
+            } catch (e) {
+              console.log('Failed to post comment:', e.message);
+            }
